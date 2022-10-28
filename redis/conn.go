@@ -23,6 +23,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"sync"
@@ -376,8 +377,31 @@ func (c *conn) writeFloat64(n float64) error {
 	return c.writeBytes(strconv.AppendFloat(c.numScratch[:0], n, 'g', -1, 64))
 }
 
+// //add process args interface loop
+func (c *conn) writerInterfaceArray(array []interface{}, argumentTypeOK bool) error {
+	for _, arg := range array {
+		if err := c.writeArg(arg, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *conn) lenArg(args []interface{}, level int) int {
+	ret := 0
+	for _, item := range args {
+		if reflect.TypeOf(item).String() == "[]interface {}" && level > 0 {
+			level--
+			ret += c.lenArg(item.([]interface{}), level)
+		} else {
+			ret++
+		}
+	}
+	return ret
+}
+
 func (c *conn) writeCommand(cmd string, args []interface{}) error {
-	c.writeLen('*', 1+len(args))
+	c.writeLen('*', 1+c.lenArg(args, 1))
 	if err := c.writeString(cmd); err != nil {
 		return err
 	}
@@ -390,6 +414,10 @@ func (c *conn) writeCommand(cmd string, args []interface{}) error {
 }
 
 func (c *conn) writeArg(arg interface{}, argumentTypeOK bool) (err error) {
+	if argumentTypeOK && reflect.TypeOf(arg).String() == "[]interface {}" {
+		return c.writerInterfaceArray(arg.([]interface{}), false)
+	}
+
 	switch arg := arg.(type) {
 	case string:
 		return c.writeString(arg)
